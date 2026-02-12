@@ -1,105 +1,84 @@
 from dotenv import load_dotenv
+from datetime import datetime
 import os
-import json
-from datetime import datetime, timedelta, date, timezone
-from dateutil.parser import parse as is_date
 
 # Import namespaces
-
+from azure.core.credentials import AzureKeyCredential
+import azure.cognitiveservices.speech as speech_sdk
 
 def main():
-
     try:
+        global speech_config
+
         # Get Configuration Settings
         load_dotenv()
-        ls_prediction_endpoint = os.getenv('LS_CONVERSATIONS_ENDPOINT')
-        ls_prediction_key = os.getenv('LS_CONVERSATIONS_KEY')
+        speech_key = os.getenv('SPEECH_KEY')
+        speech_region = os.getenv('SPEECH_REGION')
 
-        # Get user input (until they enter "quit")
-        userText = ''
-        while userText.lower() != 'quit':
-            userText = input('\nEnter some text ("quit" to stop)\n')
-            if userText.lower() != 'quit':
+        # Configure speech service
+        speech_config = speech_sdk.SpeechConfig(speech_key, speech_region)
+        print('Ready to use speech service in:', speech_config.region)
 
-                # Create a client for the Language service model
-
-                # Call the Language service model to get intent and entities
-
-                # Apply the appropriate action
+        # Get spoken input
+        command = TranscribeCommand()
+        if command and command.lower() == 'what time is it?':
+            TellTime()
 
     except Exception as ex:
         print(ex)
 
+def TranscribeCommand():
+    command = ''
 
-def GetTime(location):
-    time_string = ''
+    # Configure speech recognition
+    current_dir = os.getcwd()
+    audioFile = current_dir + '/time.wav'
+    audio_config = speech_sdk.AudioConfig(filename=audioFile)
+    speech_recognizer = speech_sdk.SpeechRecognizer(speech_config, audio_config)
 
-    # Note: To keep things simple, we'll ignore daylight savings time and support only a few cities.
-    # In a real app, you'd likely use a web service API (or write  more complex code!)
-    # Hopefully this simplified example is enough to get the the idea that you
-    # use LU to determine the intent and entities, then implement the appropriate logic
-
-    if location.lower() == 'local':
-        now = datetime.now()
-        time_string = '{}:{:02d}'.format(now.hour,now.minute)
-    elif location.lower() == 'london':
-        utc = datetime.now(timezone.utc)
-        time_string = '{}:{:02d}'.format(utc.hour,utc.minute)
-    elif location.lower() == 'sydney':
-        time = datetime.now(timezone.utc) + timedelta(hours=11)
-        time_string = '{}:{:02d}'.format(time.hour,time.minute)
-    elif location.lower() == 'new york':
-        time = datetime.now(timezone.utc) + timedelta(hours=-5)
-        time_string = '{}:{:02d}'.format(time.hour,time.minute)
-    elif location.lower() == 'nairobi':
-        time = datetime.now(timezone.utc) + timedelta(hours=3)
-        time_string = '{}:{:02d}'.format(time.hour,time.minute)
-    elif location.lower() == 'tokyo':
-        time = datetime.now(timezone.utc) + timedelta(hours=9)
-        time_string = '{}:{:02d}'.format(time.hour,time.minute)
-    elif location.lower() == 'delhi':
-        time = datetime.now(timezone.utc) + timedelta(hours=5.5)
-        time_string = '{}:{:02d}'.format(time.hour,time.minute)
+    # Process speech input
+    print("Listening...")
+    speech = speech_recognizer.recognize_once_async().get()
+    if speech.reason == speech_sdk.ResultReason.RecognizedSpeech:
+        command = speech.text
+        print(command)
     else:
-        time_string = "I don't know what time it is in {}".format(location)
-    
-    return time_string
+        print(speech.reason)
+        if speech.reason == speech_sdk.ResultReason.Canceled:
+            cancellation = speech.cancellation_details
+            print(cancellation.reason)
+            print(cancellation.error_details)
 
-def GetDate(day):
-    date_string = 'I can only determine dates for today or named days of the week.'
+    # Return the command
+    return command
 
-    weekdays = {
-        "monday":0,
-        "tuesday":1,
-        "wednesday":2,
-        "thursday":3,
-        "friday":4,
-        "saturday":5,
-        "sunday":6
-    }
+def TellTime():
+    now = datetime.now()
+    response_text = 'The time is {}:{:02d}'.format(now.hour, now.minute)
 
-    today = date.today()
+    # Configure speech synthesis
+    output_file = "output.wav"
+    speech_config.speech_synthesis_voice_name = "en-GB-RyanNeural"
+    audio_config = speech_sdk.audio.AudioConfig(filename=output_file)
+    speech_synthesizer = speech_sdk.SpeechSynthesizer(speech_config, audio_config,)
 
-    # To keep things simple, assume the named day is in the current week (Sunday to Saturday)
-    day = day.lower()
-    if day == 'today':
-        date_string = today.strftime("%m/%d/%Y")
-    elif day in weekdays:
-        todayNum = today.weekday()
-        weekDayNum = weekdays[day]
-        offset = weekDayNum - todayNum
-        date_string = (today + timedelta(days=offset)).strftime("%m/%d/%Y")
+    # Synthesize spoken output  (SSML version per the final step in the lab)
+    responseSsml = "  \
+<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>  \
+    <voice name='en-GB-LibbyNeural'>  \
+        {}  \
+        <break strength='weak'/>  \
+        Time to end this lab!  \
+    </voice>  \
+</speak>".format(response_text)
+    speak = speech_synthesizer.speak_ssml_async(responseSsml).get()
+    if speak.reason != speech_sdk.ResultReason.SynthesizingAudioCompleted:
+        print(speak.reason)
+    else:
+        print("Spoken output saved in " + output_file)
 
-    return date_string
-
-def GetDay(date_string):
-    # Note: To keep things simple, dates must be entered in US format (MM/DD/YYYY)
-    try:
-        date_object = datetime.strptime(date_string, "%m/%d/%Y")
-        day_string = date_object.strftime("%A")
-    except:
-        day_string = 'Enter a date in MM/DD/YYYY format.'
-    return day_string
+    # Print the response
+    print(response_text)
 
 if __name__ == "__main__":
     main()
